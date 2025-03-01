@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CDP Support Chatbot with Gemini API</title>
+  <style>
+    /* Basic styling for the chatbot interface */
+    body {
+      font-family: Arial, sans-serif;
+      background: #eef2f3;
+      margin: 0;
+      padding: 20px;
+    }
+    #chat-container {
+      width: 400px;
+      margin: 50px auto;
+      border: 1px solid #ccc;
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+      height: 500px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    #chat-window {
+      flex: 1;
+      padding: 10px;
+      overflow-y: auto;
+      border-bottom: 1px solid #ccc;
+    }
+    .message {
+      margin: 8px 0;
+      padding: 10px;
+      border-radius: 6px;
+      max-width: 80%;
+      line-height: 1.4;
+    }
+    .user-message {
+      background: #d1e7dd;
+      align-self: flex-end;
+    }
+    .bot-message {
+      background: #f8d7da;
+      align-self: flex-start;
+    }
+    #chat-input {
+      display: flex;
+      padding: 10px;
+    }
+    #chat-input input {
+      flex: 1;
+      padding: 10px;
+      font-size: 16px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    #chat-input button {
+      padding: 10px 15px;
+      margin-left: 8px;
+      background: #007bff;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #chat-input button:hover {
+      background: #0056b3;
+    }
+  </style>
+</head>
+<body>
+  <div id="chat-container">
+    <div id="chat-window"></div>
+    <div id="chat-input">
+      <input type="text" id="userInput" placeholder="Ask a how-to question about a CDP..." />
+      <button id="sendBtn">Send</button>
+    </div>
+  </div>
+  
+  <script>
+    // Replace with your actual Gemini API key.
+    const GEMINI_API_KEY = "AIzaSyAJ9dtI4fdUmNKODYBNGzWEh-sMi1Sy9Cw";
+    // Endpoint using the Gemini 2.0 Flash model.
+    const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+    // Knowledge Base: static answers for CDP-related queries.
+    const knowledgeBase = [
+      {
+        cdp: "segment",
+        topics: [
+          {
+            pattern: /set up.*(new\s+source|source)/i,
+            answer: "To set up a new source in Segment, log into your dashboard, navigate to 'Sources', click 'Add Source', and follow the instructions. More details: https://segment.com/docs/?ref=nav"
+          },
+          {
+            pattern: /integrate.*(data|platform)/i,
+            answer: "For integrating data in Segment, check out the available APIs or built-in integrations. See: https://segment.com/docs/"
+          }
+        ]
+      },
+      {
+        cdp: "mparticle",
+        topics: [
+          {
+            pattern: /(create|update).*(user\s+profile)/i,
+            answer: "In mParticle, create or update a user profile by sending attribute data through your SDK. Visit https://docs.mparticle.com/ for guidance."
+          },
+          {
+            pattern: /set\s*up.*(integration|source)/i,
+            answer: "To set up an integration in mParticle, navigate to your dashboard and follow the setup wizard. More info: https://docs.mparticle.com/"
+          }
+        ]
+      },
+      {
+        cdp: "lytics",
+        topics: [
+          {
+            pattern: /(build|create).*(audience\s+segment|segment)/i,
+            answer: "To build an audience segment in Lytics, go to the 'Segments' section, click 'Create New Segment', apply filters, and save. Documentation: https://docs.lytics.com/"
+          },
+          {
+            pattern: /integrate.*(data)/i,
+            answer: "For data integration in Lytics, refer to their ingestion guidelines at https://docs.lytics.com/"
+          }
+        ]
+      },
+      {
+        cdp: "zeotap",
+        topics: [
+          {
+            pattern: /(integrate|set up).*data/i,
+            answer: "To integrate your data with Zeotap, configure your data connectors and follow the integration guide at https://docs.zeotap.com/home/en-us/"
+          },
+          {
+            pattern: /set up.*(source|connector)/i,
+            answer: "Setting up a source in Zeotap involves guided steps in your dashboard. Check the docs: https://docs.zeotap.com/home/en-us/"
+          }
+        ]
+      }
+    ];
+
+    // Fallback messages.
+    const fallbackResponse = "I couldn't find a direct answer. Please refer to the official documentation.";
+    const irrelevantResponse = "It seems your question isn't related to the supported CDPs (Segment, mParticle, Lytics, or Zeotap).";
+
+    // Append a message to the chat window.
+    function appendMessage(text, sender = "bot") {
+      const chatWindow = document.getElementById("chat-window");
+      const messageDiv = document.createElement("div");
+      messageDiv.classList.add("message", sender === "user" ? "user-message" : "bot-message");
+      messageDiv.innerText = text;
+      chatWindow.appendChild(messageDiv);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    // Retrieve a static answer from the knowledge base.
+    async function getStaticAnswer(userText) {
+      if (!/segment|mparticle|lytics|zeotap/i.test(userText)) return null;
+      for (const cdps of knowledgeBase) {
+        if (new RegExp(cdps.cdp, "i").test(userText)) {
+          for (const topic of cdps.topics) {
+            if (topic.pattern.test(userText)) return topic.answer;
+          }
+        }
+      }
+      return null;
+    }
+
+    // Call the Gemini API via a fetch request.
+    async function getGeminiAnswer(question) {
+      const payload = {
+        contents: [{
+          parts: [{ text: question }]
+        }]
+      };
+      try {
+        const response = await fetch(GEMINI_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+          console.error("Error from Gemini API:", response.statusText);
+          return "";
+        }
+        const data = await response.json();
+        // Extract the answer from the response. Assuming response structure:
+        // { contents: [ { parts: [ { text: "..." } ] } ] }
+        let answer = "";
+        if (data.contents && data.contents.length > 0) {
+          data.contents.forEach(content => {
+            if (content.parts && content.parts.length > 0) {
+              answer += content.parts.map(part => part.text).join(" ");
+            }
+          });
+        }
+        return answer;
+      } catch (error) {
+        console.error("Gemini API error:", error);
+        return "";
+      }
+    }
+
+    // Process the user input.
+    async function processInput() {
+      const inputField = document.getElementById("userInput");
+      const userText = inputField.value.trim();
+      if (userText === "") return;
+      appendMessage(userText, "user");
+      inputField.value = "";
+      
+      // If question isn't about a supported CDP, show irrelevant message.
+      if (!/segment|mparticle|lytics|zeotap/i.test(userText)) {
+        appendMessage(irrelevantResponse);
+        return;
+      }
+      
+      // Try to get a static answer.
+      const staticAnswer = await getStaticAnswer(userText);
+      let finalAnswer = "";
+      if (staticAnswer) {
+        finalAnswer = "Static Answer: " + staticAnswer;
+      } else {
+        // Fallback to Gemini API answer if rule-based answer fails.
+        const geminiAnswer = await getGeminiAnswer(userText);
+        if (geminiAnswer) {
+          finalAnswer = "Universal Answer (Gemini API): " + geminiAnswer;
+        } else {
+          finalAnswer = fallbackResponse;
+        }
+      }
+      setTimeout(() => appendMessage(finalAnswer), 500);
+    }
+
+    document.getElementById("sendBtn").addEventListener("click", processInput);
+    document.getElementById("userInput").addEventListener("keydown", function(event) {
+      if (event.key === "Enter") processInput();
+    });
+  </script>
+</body>
+</html>
